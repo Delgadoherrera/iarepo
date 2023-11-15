@@ -4,8 +4,9 @@ from langchain.chains import ConversationalRetrievalChain
 import openai
 
 # Función para crear una cadena de conversación con un modelo de lenguaje y un almacén de vectores
-def create_conversation_chain(vector_store):
-    llm = ChatOpenAI(model="gpt-4", openai_api_key=openai.api_key, max_tokens=550, temperature=0.2)
+def create_conversation_chain(vector_store, max_tokens=550, temperature=0.2):
+    print('max_Tokens=',max_tokens, 'temperature=',temperature)
+    llm = ChatOpenAI(model="gpt-4", openai_api_key=openai.api_key, max_tokens=max_tokens, temperature=temperature)
     memory = ConversationBufferMemory(memory_key='chat_history', return_messages=True, output_key='answer')
     return ConversationalRetrievalChain.from_llm(llm=llm, retriever=vector_store.as_retriever(), memory=memory)
 
