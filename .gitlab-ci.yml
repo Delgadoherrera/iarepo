@@ -1,0 +1,97 @@
+variables:
+  DOCKER_IMAGE: unum-ia:latest
+  DOCKER_WEB_PORT: "8087"
+  AWS_REGISTRY: 909644501761.dkr.ecr.us-east-1.amazonaws.com
+  AWS_TAG_LATEST: $AWS_REGISTRY/$DOCKER_IMAGE
+
+stages:
+  - build
+  - deploy
+  - artifact
+  - notify
+
+build_project:
+  image: python:3.11.4-slim-buster
+  stage: build
+  variables:
+    PYTHONDONTWRITEBYTECODE: 1
+    PYTHONUNBUFFERED: 1
+  script:
+    - apt-get update && apt-get install -y --no-install-recommends gcc tesseract-ocr
+    - pip install --upgrade pip
+    - pip wheel --no-cache-dir --no-deps --wheel-dir wheels -r requirements.txt
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - wheels
+  tags:
+    - dockerdevops
+  only:
+    - branches
+    - tags
+
+deploy_docker_image:
+  image: docker:20.10.20
+  stage: deploy
+  services:
+    - name: docker:20.10.20-dind
+      alias: thedockerhost
+  variables:
+    DOCKER_HOST: tcp://thedockerhost:2375/
+    DOCKER_TLS_CERTDIR: ""
+  dependencies:
+    - build_project
+  script:
+    - echo "$DOCKER_HUB_TOKEN" | docker login -u $DOCKER_HUB_USER --password-stdin
+    - docker build -t ${DOCKER_IMAGE} -f Dockerfile .
+    - docker tag ${DOCKER_IMAGE} unumdeploy/${DOCKER_IMAGE}
+    - docker push unumdeploy/${DOCKER_IMAGE}
+  tags:
+    - dockerdevops
+  only:
+    - develop
+
+deploy_ecr_image:
+  image:
+    name: amazon/aws-cli
+    entrypoint: [""]
+  stage: deploy
+  services:
+    - name: docker:20.10.20-dind
+      alias: thedockerhost
+  variables:
+    DOCKER_HOST: tcp://thedockerhost:2375/
+    DOCKER_DRIVER: overlay2
+    DOCKER_TLS_CERTDIR: ""
+  dependencies:
+    - build_project
+  before_script:
+    - amazon-linux-extras install docker
+    - aws --version
+    - docker --version
+  script:
+    - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $AWS_REGISTRY
+    - docker build -t $DOCKER_IMAGE -f Dockerfile .
+    - docker tag $DOCKER_IMAGE $AWS_TAG_LATEST
+    - docker push $AWS_TAG_LATEST
+  tags:
+    - dockerdevops
+  only:
+    - develop
+  when: manual
+
+deploy_project:
+  stage: deploy
+  dependencies:
+    - build_project
+  script:
+    - sudo docker compose -f "docker-compose.yml" up -d --build
+    - sudo docker system prune --force
+    - sudo docker volume prune --force
+  tags:
+    - shelldevops
+  only:
+    - develop
+
+include:
+  - templates/.gitlac-ci-notify.yml
